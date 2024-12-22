@@ -2,13 +2,20 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
-#include <src/dataloder.h>
+#include <dataloader.h>
 
 
 #define TRAIN_IMG_PATH "data/train-images.idx3-ubyte"
 #define TRAIN_LBL_PATH "data/train-labels.idx1-ubyte"
 
 #define INPUT_SIZE 784
+
+
+struct Cnn
+{
+    
+        
+};
 
 
 

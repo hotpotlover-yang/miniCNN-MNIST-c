@@ -42,14 +42,14 @@ void dataloader_init(DataLoader* dataloader, const char* images_path, const char
     dataloader->imageSize.col = __builtin_bswap32(dataloader->imageSize.col);
 
     printf("read %s  temp: %d, nImages: %d, rows: %d, cols: %d\n",images_path,\
-         temp, dataloader->nImages, dataloader->imageSize.row, dataloader->imageSize.col);
+         temp, (int)dataloader->nImages, (int)dataloader->imageSize.row, (int)dataloader->imageSize.col);
 
     freadCheck(&temp, sizeof(int), 1, dataloader->labelsfile);
     freadCheck(&dataloader->nLabels, sizeof(int), 1, dataloader->labelsfile);
 
     dataloader->nLabels = __builtin_bswap32(dataloader->nLabels);
 
-    printf("%s temp: %d, nLabels: %d\n",labels_path, temp, dataloader->nLabels);
+    printf("%s temp: %d, nLabels: %d\n",labels_path, temp, (int)dataloader->nLabels);
     // dataloader->images = (float*)malloc(dataloader->nImages * dataloader->imageSize.row * dataloader->imageSize.col * sizeof(float));
 
     dataloader->images = (unsigned char*)malloc(dataloader->nImages * dataloader->imageSize.row * dataloader->imageSize.col * sizeof(unsigned char));
