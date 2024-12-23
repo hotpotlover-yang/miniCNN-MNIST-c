@@ -4,8 +4,8 @@ CXX = g++
 CC = gcc
 
 # 编译选项
-CXXFLAGS = -g -Wall 
-CFLAGS = -g -Wall
+CXXFLAGS = -g -Wall -lm
+CFLAGS = -g -Wall -lm
 
 # 目标文件
 TARGET = cnn
@@ -18,14 +18,14 @@ INCLUDE= -I./src
 
 # 生成目标文件
 $(TARGET): $(OBJS)
-	$(CC) $(CXXFLAGS) -o $@ $^ ${INCLUDE}
+	$(CC)  -o $@ $^ ${INCLUDE} $(CFLAGS)
 
 
-# 生成目标文件
-%.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $<
+# # 生成目标文件
+# %.o: %.cpp
+# 	$(CXX) $(CXXFLAGS) -c $<
 ${OBJS}: ${SRCS}
-	$(CC) $(CFLAGS) -c $< ${INCLUDE}
+	$(CC)  -c $< ${INCLUDE} $(CFLAGS)
 # 清理
 clean:
 	rm -f $(OBJS) $(TARGET)
