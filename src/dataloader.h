@@ -58,9 +58,30 @@ void dataloader_init(DataLoader* dataloader, const char* images_path, const char
     dataloader->labels = (unsigned char*)malloc(dataloader->nLabels * sizeof(unsigned char));
     freadCheck(dataloader->labels, sizeof(unsigned char), dataloader->nLabels, dataloader->labelsfile);
 
+    if (should_shuffer){
+        shuffle_data(dataloader);
+    }
 
     fcloseCheck(dataloader->imagesfile);
     fcloseCheck(dataloader->labelsfile);
+}
+
+void shuffle_data(DataLoader* dataloader){
+    if(dataloader->should_shuffer){
+        for(int i=dataloader->nImages-1; i>1; i--){
+            int j = rand() % i;
+            unsigned char* i_images = dataloader->images + i*dataloader->imageSize.row*dataloader->imageSize.col;
+            unsigned char* j_images = dataloader->images + j*dataloader->imageSize.row*dataloader->imageSize.col;
+            for(int k=0;k<dataloader->imageSize.row*dataloader->imageSize.col;k++){
+                unsigned char temp = i_images[k];
+                i_images[k] = j_images[k];
+                j_images[k] = temp;
+            }
+            int label_i = dataloader->labels[i];
+            dataloader->labels[i] = dataloader->labels[j];
+            dataloader->labels[j] = label_i;
+        }
+    }
 }
 
 
