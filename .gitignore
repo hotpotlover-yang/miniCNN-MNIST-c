@@ -1,32 +1,28 @@
-# Prerequisites
-*.d
+# 忽略所有文件
+*
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# 提交data目录下
+!data/
 
-# Precompiled Headers
-*.gch
-*.pch
+# 提交src目录下
+!src/
 
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
+# 提交README.md
+!*.md
 
-# Fortran module files
-*.mod
-*.smod
+# 提交.c文件
+!*.c
+!*.cpp
 
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
+# 提交.h文件
+!*.h
 
-# Executables
-*.exe
-*.out
-*.app
+# 提交Makefile
+!Makefile
+
+# 提交LICENSE
+!LICENSE
+
+!.gitignore*
+
+
