@@ -2,6 +2,7 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include<utils.h>
+#include<string.h>
 
 
 typedef struct{
@@ -81,6 +82,13 @@ void shuffle_data(DataLoader* dataloader){
             dataloader->labels[i] = dataloader->labels[j];
             dataloader->labels[j] = label_i;
         }
+    }
+}
+
+void load_betch_images(DataLoader* dataloader, float* dst,int idx, int batch){
+    unsigned char* images = dataloader->images + idx*batch*dataloader->imageSize.row*dataloader->imageSize.col;
+    for(int i=0;i<batch*dataloader->imageSize.row*dataloader->imageSize.col; i++){
+        dst[i] = (float)images[i];
     }
 }
 
