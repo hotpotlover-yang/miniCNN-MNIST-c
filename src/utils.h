@@ -22,7 +22,7 @@ extern inline FILE *fopen_check(const char *path, const char *mode, const char *
 
 #define fopenCheck(path, mode) fopen_check(path, mode, __FILE__, __LINE__)
 
-extern inline void* fread_check(void *ptr, size_t size, size_t nmemb, FILE *stream, const char* file, int line) {
+extern inline void fread_check(void *ptr, size_t size, size_t nmemb, FILE *stream, const char* file, int line) {
     size_t ret = fread(ptr, size, nmemb, stream);
     if (ret != nmemb){
         if (feof(stream)){

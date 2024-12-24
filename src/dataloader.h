@@ -12,6 +12,11 @@ typedef struct{
 }PictureSize;
 
 
+typedef struct{
+    float* data;
+    int* labels;
+}Data;
+
 typedef struct {
     size_t nImages;
     size_t nLabels;
@@ -26,6 +31,8 @@ typedef struct {
     size_t header_bytes;
     size_t image_bytes;
 } DataLoader;
+
+void shuffle_data(DataLoader* dataloader);
 
 void dataloader_init(DataLoader* dataloader, const char* images_path, const char* labels_path, int should_shuffer){
     dataloader->imagesfile = fopenCheck(images_path, "rb");
@@ -85,10 +92,19 @@ void shuffle_data(DataLoader* dataloader){
     }
 }
 
-void load_betch_images(DataLoader* dataloader, float* dst,int idx, int batch){
+void load_betch_images(DataLoader* dataloader, Data* datas,int idx, int batch){
     unsigned char* images = dataloader->images + idx*batch*dataloader->imageSize.row*dataloader->imageSize.col;
-    for(int i=0;i<batch*dataloader->imageSize.row*dataloader->imageSize.col; i++){
-        dst[i] = (float)images[i];
+    // for(int i=0;i<batch*dataloader->imageSize.row*dataloader->imageSize.col; i++){
+    //     dst[i] = (float)images[i];
+    // }
+    int row = dataloader->imageSize.row;
+    int col = dataloader->imageSize.col;
+
+    for(int i=0;i<batch;i++){
+        datas->labels[i] = dataloader->labels[idx*batch+i];
+        for(int j=0;j<row*col;j++){
+            datas->data[i*row*col+j] = (float)images[i*row*col+j];
+        }
     }
 }
 
