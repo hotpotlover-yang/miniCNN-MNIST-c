@@ -25,6 +25,7 @@
 #define BATCH 1000
 #define TRAIN_SPLIT 0.8
 #define LEARN_RATE 0.05
+#define MOMENTUM 0.9f
 
 typedef struct{
     int x;
@@ -82,6 +83,10 @@ typedef struct{
     float* grad_output;
 }Grad_Activation;
 
+typedef struct{
+    float* mem_fc_output;
+    float* mem_fc1;
+}Mementun;
 
 typedef struct
 {
@@ -96,6 +101,9 @@ typedef struct
     Grad_Activation grad_acts;
     float* grad_acts_memory;
     int total_grad_acts;
+
+    float* mementun_memory;
+    Mementun mementun;
 }CNN;
 
 void init_params(float*params, int size){
@@ -124,6 +132,7 @@ void CNN_init(CNN *model, int imageSize,int k1, int c1, int stride1, int p1,int 
     model->params_memory = NULL;
     model->acts_memory = NULL;
     model->grad_acts_memory = NULL;
+    model->mementun_memory = NULL;
 
     int total_params = k1*k1*c1 + k2*k2*c2 + model->params.fc.input_size*fc1_size + fc1_size*outputSize;
     model->toal_params = total_params;
@@ -151,30 +160,30 @@ void CNN_init(CNN *model, int imageSize,int k1, int c1, int stride1, int p1,int 
     acts->fc_size = (Shape){1,1,fc1_size};
     acts->output_size = (Shape){1,1,outputSize};
 
-    long int total_acts = 0;
-    {
-    total_acts += acts->conv1_size.x*acts->conv1_size.y*acts->conv1_size.z;
-    total_acts += acts->pool1_size.x*acts->pool1_size.y*acts->pool1_size.z;
-    total_acts += acts->conv2_size.x*acts->conv2_size.y*acts->conv2_size.z;
-    total_acts += acts->pool2_size.x*acts->pool2_size.y*acts->pool2_size.z;
-    total_acts += acts->fc_size.z;
-    total_acts += acts->output_size.z;
-    }
-    model->total_acts = total_acts;
-    printf("total_acts: %ld\n", total_acts);
-    model->acts_memory = (float*)malloc(total_acts*sizeof(float));
     int offset = 0;
-    acts->conv1 = model->acts_memory;
-    offset += acts->conv1_size.x*acts->conv1_size.y*acts->conv1_size.z;
-    acts->pool1 = model->acts_memory + offset;
-    offset += acts->pool1_size.x*acts->pool1_size.y*acts->pool1_size.z;
-    acts->conv2 = model->acts_memory + offset;
-    offset += acts->conv2_size.x*acts->conv2_size.y*acts->conv2_size.z;
-    acts->pool2 = model->acts_memory + offset;
-    offset += acts->pool2_size.x*acts->pool2_size.y*acts->pool2_size.z;
-    acts->fc = model->acts_memory + offset;
-    offset += acts->fc_size.z;
-    acts->output = model->acts_memory + offset;
+    if(model->acts_memory == NULL){
+        long int total_acts = 0;
+        total_acts += acts->conv1_size.x*acts->conv1_size.y*acts->conv1_size.z;
+        total_acts += acts->pool1_size.x*acts->pool1_size.y*acts->pool1_size.z;
+        total_acts += acts->conv2_size.x*acts->conv2_size.y*acts->conv2_size.z;
+        total_acts += acts->pool2_size.x*acts->pool2_size.y*acts->pool2_size.z;
+        total_acts += acts->fc_size.z;
+        total_acts += acts->output_size.z;
+        model->total_acts = total_acts;
+        printf("total_acts: %ld\n", total_acts);
+        model->acts_memory = (float*)malloc(total_acts*sizeof(float));
+        acts->conv1 = model->acts_memory;
+        offset += acts->conv1_size.x*acts->conv1_size.y*acts->conv1_size.z;
+        acts->pool1 = model->acts_memory + offset;
+        offset += acts->pool1_size.x*acts->pool1_size.y*acts->pool1_size.z;
+        acts->conv2 = model->acts_memory + offset;
+        offset += acts->conv2_size.x*acts->conv2_size.y*acts->conv2_size.z;
+        acts->pool2 = model->acts_memory + offset;
+        offset += acts->pool2_size.x*acts->pool2_size.y*acts->pool2_size.z;
+        acts->fc = model->acts_memory + offset;
+        offset += acts->fc_size.z;
+        acts->output = model->acts_memory + offset;
+    }
 
     // init grad_acts
     if (model->grad_acts_memory == NULL){
@@ -187,7 +196,7 @@ void CNN_init(CNN *model, int imageSize,int k1, int c1, int stride1, int p1,int 
         model->total_grad_acts += acts->conv1_size.x*acts->conv1_size.y*acts->conv1_size.z;
         model->grad_acts_memory = (float*)malloc(model->total_grad_acts*sizeof(float));
         offset = 0;
-        model->grad_acts.grad_conv1 = model->grad_acts_memory;
+        model->grad_acts.grad_conv1 = model->grad_acts_memory; 
         offset += acts->conv1_size.x*acts->conv1_size.y*acts->conv1_size.z;
         model->grad_acts.grad_pool1 = model->grad_acts_memory + offset;
         offset += acts->pool1_size.x*acts->pool1_size.y*acts->pool1_size.z;
@@ -198,6 +207,17 @@ void CNN_init(CNN *model, int imageSize,int k1, int c1, int stride1, int p1,int 
         model->grad_acts.grad_fc = model->grad_acts_memory + offset;
         offset += acts->fc_size.z;
         model->grad_acts.grad_output = model->grad_acts_memory + offset;
+    }
+
+    if(model->mementun_memory == NULL){
+        int total_mementun = 0;
+        total_mementun += fc1_size*outputSize;
+        total_mementun += acts->pool2_size.x * acts->pool2_size.y * acts->pool2_size.z * fc1_size;
+        
+        model->mementun_memory = (float*)malloc(total_mementun*sizeof(float));
+
+        model->mementun.mem_fc_output = model->mementun_memory;
+        model->mementun.mem_fc1 = model->mementun_memory + fc1_size*outputSize;
     }
 }
 
@@ -287,8 +307,7 @@ void softmax_forward(float* inp, int inp_size){
     }
     return;
 }
-
-
+   
 void cnn_forward(CNN *model, float* inp, int h, int w){
     Activation* acts = &model->acts;
     Shape conv1_shape = conv_forward(inp,h,w,1, acts->conv1, model->params.conv1.weights, model->params.conv1.size, model->params.conv1.stride, model->params.conv1.filters);
@@ -302,18 +321,50 @@ void cnn_forward(CNN *model, float* inp, int h, int w){
     softmax_forward(acts->output, output_shape.z);
 }
 
-
-
-void softmax_backward(float* inp, int inp_size, float* inp_grad){
+void softmax_backward(float* inp, int inp_size,int target, float* d_inp){
     for(int i=0;i<inp_size;i++){
-        inp[i] = inp[i]*(1-inp[i]);
+        if (i == target){
+            d_inp[i] = inp[i] - 1.0f;
+        }else{
+            d_inp[i] = inp[i];
+        }
     }
 }
 
-void cnn_backward(CNN *model, float lr){
+void fc_backward(float* inp, Shape inp_size, float* d_loss, Shape out_size, float* weights, float* d_inp, float* mementun, float lr){
+    /* 
+        weights: (inp_len, out_len) 
+    */
+   int inp_len = inp_size.x*inp_size.y*inp_size.z;
+   int out_len = out_size.z; // fc 输出1维
+    for(int i=0;i<inp_len; i++){
+        for(int j=0;j<out_size.z;j++){
+            d_inp[i] += d_loss[j]*weights[i*out_size.z+j];
+        }
+    }
+
+    // update weights
+    for (int i = 0; i < inp_len ; i++){
+        float* weight_row = weights + i*out_size.z;
+        float* mementun_row = mementun + i*out_size.z;
+        for (int j = 0; j < out_len; j++){
+            float gradW_ij = inp[i]*d_loss[j];
+            mementun_row[j] = mementun_row[j]*MOMENTUM - lr*gradW_ij;
+            weight_row[j] -= mementun_row[j];
+        }
+    } 
+}
+
+void cnn_backward(CNN *model,float* inp,int label, float lr){
     Activation acts = model->acts;
     Grad_Activation grad_acts = model->grad_acts;
-    printf("backward: grad_acts is NULL: %d\n", model->grad_acts_memory == NULL);
+    float* output = acts.output;
+    int* target = model->datas.labels;
+    int output_size = acts.output_size.z;
+    softmax_backward(output, output_size,label, grad_acts.grad_output);
+
+    fc_backward(acts.fc, acts.fc_size, grad_acts.grad_output, acts.output_size, model->params.output.weights, grad_acts.grad_fc, model->mementun.mem_fc_output, lr);
+    fc_backward(acts.pool2, acts.pool2_size, grad_acts.grad_fc, acts.fc_size, model->params.fc.weights, grad_acts.grad_pool2, model->mementun.mem_fc1, lr);
 }
 
 
@@ -342,16 +393,15 @@ int main(int argc, char const *argv[])
                 float* images = model.datas.data + t*ImageSize*ImageSize;
                 int label_idx = model.datas.labels[t];
                 cnn_forward(&model,images,dataloader.imageSize.row,dataloader.imageSize.col);
-                loss += - logf(model.acts.output[label_idx] + 1e-10f);
-                cnn_backward(&model, LEARN_RATE);
+                loss -= logf(model.acts.output[label_idx] + 1e-10f);
+                cnn_backward(&model,images, label_idx, LEARN_RATE);
             }
             printf("epoch: %d, batch: %d, loss: %f\n", epoch, b, loss/BATCH);
-
+            loss = 0.0f;
         }
 
     }
     
-
 
     free(dataloader.images);
     free(dataloader.labels);
