@@ -37,6 +37,8 @@ void shuffle_data(DataLoader* dataloader);
 void dataloader_init(DataLoader* dataloader, const char* images_path, const char* labels_path, int should_shuffer){
     dataloader->imagesfile = fopenCheck(images_path, "rb");
     dataloader->labelsfile = fopenCheck(labels_path, "rb");
+    dataloader->labels = NULL;
+    dataloader->images = NULL;
 
     dataloader->should_shuffer = should_shuffer;
     int temp;
@@ -72,6 +74,13 @@ void dataloader_init(DataLoader* dataloader, const char* images_path, const char
 
     fcloseCheck(dataloader->imagesfile);
     fcloseCheck(dataloader->labelsfile);
+}
+
+void DataLoader_clear(DataLoader *dataloader){
+    if(dataloader->images != NULL)
+        free(dataloader->images);
+    if(dataloader->labels != NULL)
+        free(dataloader->labels);
 }
 
 void shuffle_data(DataLoader* dataloader){

@@ -221,6 +221,33 @@ void CNN_init(CNN *model, int imageSize,int k1, int c1, int stride1, int p1,int 
     }
 }
 
+void CNN_clear(CNN *model){
+    if(model->params_memory != NULL){
+        free(model->params_memory);
+        model->params_memory = NULL;
+    }
+    if(model->acts_memory != NULL){
+        free(model->acts_memory);
+        model->acts_memory = NULL;
+    }
+    if(model->grad_acts_memory != NULL){
+        free(model->grad_acts_memory);
+        model->grad_acts_memory = NULL;
+    }
+    if(model->mementun_memory != NULL){
+        free(model->mementun_memory);
+        model->mementun_memory = NULL;
+    }
+    if (model->datas.data != NULL){
+        free(model->datas.data);
+        model->datas.data = NULL;
+    }
+    if (model->datas.labels != NULL){
+        free(model->datas.labels);
+        model->datas.labels = NULL;
+    }
+}
+
 Shape conv_forward(float *inp, int h, int w,int z,float* out, float* conv_weights, int kernel_size, int stride, int channel){
     /* 
     inp: (h,w,z)
@@ -352,7 +379,44 @@ void fc_backward(float* inp, Shape inp_size, float* d_loss, Shape out_size, floa
             mementun_row[j] = mementun_row[j]*MOMENTUM - lr*gradW_ij;
             weight_row[j] -= mementun_row[j];
         }
-    } 
+    }
+}
+
+void pool_backward(float* inp, Shape inp_size, float* d_loss, Shape out_size, float* d_inp, int pool_size){
+    /* 
+        max pool backward
+        for a channel z, the loc (i,j) in the output(d_loss)
+        map to max value in the inp (i*pool_size:i*pool_size+pool_size, j*pool_size:j*pool_size+pool_size)
+    */
+   
+   for(int z=0; z<inp_size.z; z++){  // input channel equals output channel
+        // init d_inp
+        for(int x=0;x<inp_size.x; x++){
+            for (int y = 0; y < inp_size.y; y++){
+                d_inp[z*inp_size.x*inp_size.y + x*inp_size.y + y] = 0.0f;
+            }
+        }
+
+        // update d_inp
+        for(int i=0;i<out_size.x;i++){
+            for(int j=0;j<out_size.y;j++){
+                float max = 0.0f;
+                int max_i = 0;
+                int max_j = 0;
+                for(int k=0;k<pool_size;k++){
+                     for(int l=0;l<pool_size;l++){
+                          float val = inp[z*inp_size.x*inp_size.y + (i*pool_size+k)*inp_size.y + j*pool_size+l];
+                          if (val > max){
+                            max = val;
+                            max_i = i*pool_size+k;
+                            max_j = j*pool_size+l;
+                          }
+                     }
+                }
+                d_inp[z*inp_size.x*inp_size.y + max_i*inp_size.y + max_j] = d_loss[z*out_size.x*out_size.y + i*out_size.y + j];
+            }
+        }
+   }
 }
 
 void cnn_backward(CNN *model,float* inp,int label, float lr){
@@ -403,12 +467,7 @@ int main(int argc, char const *argv[])
     }
     
 
-    free(dataloader.images);
-    free(dataloader.labels);
-    free(model.params_memory);
-    free(model.datas.data);
-    free(model.datas.labels);
-    free(model.acts_memory);
-    free(model.grad_acts_memory);
+    DataLoader_clear(&dataloader);
+    CNN_clear(&model);
     return 0;
 }
