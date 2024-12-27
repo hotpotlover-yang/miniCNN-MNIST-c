@@ -86,6 +86,8 @@ typedef struct{
 typedef struct{
     float* mem_fc_output;
     float* mem_fc1;
+    float* mem_conv2;
+    float* mem_conv1;
 }Mementun;
 
 typedef struct
@@ -213,11 +215,19 @@ void CNN_init(CNN *model, int imageSize,int k1, int c1, int stride1, int p1,int 
         int total_mementun = 0;
         total_mementun += fc1_size*outputSize;
         total_mementun += acts->pool2_size.x * acts->pool2_size.y * acts->pool2_size.z * fc1_size;
+        total_mementun += acts->conv2_size.x*acts->conv2_size.y*acts->conv2_size.z;
+        total_mementun += acts->conv1_size.x*acts->conv1_size.y*acts->conv1_size.z;
         
         model->mementun_memory = (float*)malloc(total_mementun*sizeof(float));
 
-        model->mementun.mem_fc_output = model->mementun_memory;
-        model->mementun.mem_fc1 = model->mementun_memory + fc1_size*outputSize;
+        offset = 0;
+        model->mementun.mem_fc_output = model->mementun_memory; // fc1_size*outputSize
+        offset += fc1_size*outputSize;
+        model->mementun.mem_fc1 = model->mementun_memory + offset; // acts->pool2_size.x * acts->pool2_size.y * acts->pool2_size.z * fc1_size
+        offset += acts->pool2_size.x * acts->pool2_size.y * acts->pool2_size.z * fc1_size;
+        model->mementun.mem_conv2 = model->mementun_memory + offset; // acts->conv2_size.x*acts->conv2_size.y*acts->conv2_size.z
+        offset += acts->conv2_size.x*acts->conv2_size.y*acts->conv2_size.z;
+        model->mementun.mem_conv1 = model->mementun_memory + offset; // acts->conv1_size.x*acts->conv1_size.y*acts->conv1_size.z
     }
 }
 
@@ -511,6 +521,11 @@ void conv_backward(float* inp, Shape inp_size, float*d_loss, Shape out_size, flo
         }
     }
 
+    for (int i = 0; i < channel*kernel_size*kernel_size; i++){
+        conv_weights[i] += mementun[i];
+    }
+    
+
     free(full_conv_dloss);
 }
 
@@ -524,10 +539,18 @@ void cnn_backward(CNN *model,float* inp,int label, float lr){
 
     fc_backward(acts.fc, acts.fc_size, grad_acts.grad_output, acts.output_size, model->params.output.weights, grad_acts.grad_fc, model->mementun.mem_fc_output, lr);
     fc_backward(acts.pool2, acts.pool2_size, grad_acts.grad_fc, acts.fc_size, model->params.fc.weights, grad_acts.grad_pool2, model->mementun.mem_fc1, lr);
+    //TODO: there has some question
     pool_backward(acts.conv2, acts.conv2_size, grad_acts.grad_pool2, acts.pool2_size, grad_acts.grad_conv2, model->params.pool2Size);
-    
+    conv_backward(acts.pool1, acts.pool1_size, 
+                    grad_acts.grad_conv2, acts.conv2_size, acts.conv2, 
+                    grad_acts.grad_pool1, model->params.Conv2.weights, 
+                    model->mementun.mem_conv2 , model->params.Conv2.size, 
+                    model->params.Conv2.stride, model->params.Conv2.filters, lr);
+    pool_backward(acts.conv1, acts.conv1_size, grad_acts.grad_pool1, acts.pool1_size, grad_acts.grad_conv1, model->params.pool1Size);
+    conv_backward(inp, (Shape){28,28,1}, grad_acts.grad_conv1, acts.conv1_size, acts.conv1, 
+                    grad_acts.grad_pool1, model->params.conv1.weights, model->mementun.mem_conv1, 
+                    model->params.conv1.size, model->params.conv1.stride, model->params.conv1.filters, lr);
 }
-
 
 
 int main(int argc, char const *argv[])
@@ -546,10 +569,11 @@ int main(int argc, char const *argv[])
 
     for (int epoch = 0; epoch < EPOCHS; epoch++){
         start = clock();
+        float loss = 0.0f;
         for(int b=0;b<train_size/BATCH;b++){
             // float* images = dataloader.images + b*BATCH*ImageSize*ImageSize;
             load_betch_images(&dataloader, &model.datas, b, BATCH);
-            float loss = 0.0f;
+            
             for (int t = 0; t < BATCH; t++){
                 float* images = model.datas.data + t*ImageSize*ImageSize;
                 int label_idx = model.datas.labels[t];
@@ -557,10 +581,20 @@ int main(int argc, char const *argv[])
                 loss -= logf(model.acts.output[label_idx] + 1e-10f);
                 cnn_backward(&model,images, label_idx, LEARN_RATE);
             }
-            printf("epoch: %d, batch: %d, loss: %f\n", epoch, b, loss/BATCH);
-            loss = 0.0f;
+            
+            // loss = 0.0f;
         }
+        printf("epoch: %d, loss: %f\n", epoch, loss/BATCH);
 
+        float corr = 0.0f;
+        for(int t=0;t<test_size;t++){    
+            float* test_images = dataloader.images + (train_size+t)*ImageSize*ImageSize;
+            int test_labels = dataloader.labels + train_size+t;
+            cnn_forward(&model,test_images,dataloader.imageSize.row,dataloader.imageSize.col);
+            corr += model.acts.output[test_labels]>0.5f?1.0f:0.0f;
+        }
+        printf("epoch: %d, test accuracy: %f\n", epoch, corr/test_size);
+        end = clock();
     }
     
 

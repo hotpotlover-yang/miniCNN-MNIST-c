@@ -5,7 +5,7 @@ CC = gcc
 
 # 编译选项
 CXXFLAGS = -g -Wall -lm
-CFLAGS = -g -Wall -lm
+CFLAGS = -g -Wall -lm -O3 -ffast-math
 
 # 目标文件
 TARGET = cnn
