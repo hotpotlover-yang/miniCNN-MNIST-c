@@ -6,9 +6,16 @@
 
 # 提交src目录下
 !src/
+!src/**/*
+
+!doc/
+!doc/**/*
+
 
 # 提交README.md
 !*.md
+!*.png
+!*.jpg
 
 # 提交.c文件
 !*.c
