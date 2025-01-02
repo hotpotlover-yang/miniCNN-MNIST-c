@@ -451,6 +451,7 @@ void fc_backward(float* inp, Shape inp_size, float* d_loss, Shape out_size, floa
     /* 
         weights: (inp_len, out_len) 
     */
+   //TODO  检查修改
    int inp_len = inp_size.x*inp_size.y*inp_size.z;
    int out_len = out_size.z; // fc 输出1维
     for(int i=0;i<inp_len; i++){
@@ -458,7 +459,7 @@ void fc_backward(float* inp, Shape inp_size, float* d_loss, Shape out_size, floa
             d_inp[i] += d_loss[j]*weights[i*out_size.z+j];
         }
     }
-    float* weight_mementun  = mementun;
+    float* weight_mementun = mementun;
     float* bias_mementun = mementun + inp_len*out_len;
 
     // update weights
