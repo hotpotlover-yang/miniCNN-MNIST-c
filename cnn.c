@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
-#include <dataloader.h>
 #include <float.h>
+#include "dataloader.h"
 
 
 #define TRAIN_IMG_PATH "data/train-images.idx3-ubyte"
@@ -33,58 +33,106 @@ typedef struct{
     int z;
 } Shape;
 
-typedef struct{
-    float* weights;
-    int size;
-    int stride;
-    int filters;
-} Conv;
+typedef struct
+{
+    Shape in_size;
+    Shape out_size;
+}Size;
+void init_size(Size *size, int in_x,int in_y,int in_z,int out_x,int out_y,int out_z){
+    size->in_size.x = in_x;
+    size->in_size.y = in_y;
+    size->in_size.z = in_z;
+    size->out_size.x = out_x;
+    size->out_size.y = out_y;
+    size->out_size.z = out_z;
+}
 
 typedef struct{
     float* weights;
-    int input_size;
-    int output_size;
+    Size size;
+    int kernel_size;
+    int stride;
+    int filters;
+    int weights_size;
+    int num_params;
+} Conv;
+
+void init_conv(Conv* conv, int in_x,int in_y, int in_channel, int kernel_size, int stride, int filters){
+    conv->kernel_size = kernel_size;
+    conv->stride = stride;
+    conv->filters = filters;
+    init_size(&(conv->size), in_x, in_y, in_channel, 
+                (in_x - kernel_size)/stride + 1, (in_y - kernel_size)/stride + 1, filters);
+    conv->weights_size = kernel_size*kernel_size*filters;
+    conv->num_params = conv->weights_size;
+    conv->weights = NULL;
+}
+
+typedef struct
+{
+    Size size;
+    int pool_size;
+}Pool;
+
+void init_pool(Pool* pool, int in_x, int in_y, int in_z, int pool_size){
+    init_size(&(pool->size), in_x, in_y, in_z, in_x/pool_size, in_y/pool_size, in_z);
+    pool->pool_size = pool_size;
+}
+
+typedef struct{
+    float* weights;
+    float* bias;
+    Size size;
+    int weight_size;
+    int bias_size;
+    int num_params;
 }FC;
+
+void init_fc(FC* fc, int in_size, int out_size){
+    init_size(&(fc->size), 1, 1, in_size, 1, 1, out_size);
+    fc->weight_size = in_size*out_size;
+    fc->bias_size = out_size;
+    fc->num_params = fc->weight_size + fc->bias_size;
+    fc->weights = NULL;
+    fc->bias = NULL;
+}
 
 typedef struct{
     Conv conv1; // (K1,K1,C1)
-    int pool1Size;
-    Conv Conv2; // (K2,K2,C2)
-    int pool2Size;
+    Pool pool1;
+    Conv conv2; // (K2,K2,C2)
+    Pool pool2;
     // Conv Conv3; // (K3,K3,C3)
-    FC fc;
-    FC output;
-
+    FC fc1;
+    FC fc2;
 }Paramerters;
 
 typedef struct{
-    float* conv1; // ( (imageSize-K1)/stride + 1, (imageSize-K1)/stride + 1, C1)
+    float* out_conv1; // ( (imageSize-K1)/stride + 1, (imageSize-K1)/stride + 1, C1)
     Shape conv1_size;
-    float* relu1; // ( (imageSize-K1)/stride + 1, (imageSize-K1)/stride + 1, C1)
-    float* pool1; // ( ((imageSize-K1)/stride + 1)/P1, ((imageSize-K1)/stride + 1)/P1, C1)
+    float* out_pool1; // ( ((imageSize-K1)/stride + 1)/P1, ((imageSize-K1)/stride + 1)/P1, C1)
     Shape pool1_size;
-    float* conv2; // ( ((imageSize-K1)/stride + 1)/P1 - K2)/stride + 1, ((imageSize-K1)/stride + 1)/P1 - K2)/stride + 1, C2)
+    float* out_conv2; // ( ((imageSize-K1)/stride + 1)/P1 - K2)/stride + 1, ((imageSize-K1)/stride + 1)/P1 - K2)/stride + 1, C2)
     Shape conv2_size;
-    float* relu2; // ( ((imageSize-K1)/stride + 1)/P1 - K2)/stride + 1, ((imageSize-K1)/stride + 1)/P1 - K2)/stride + 1, C2)
-    float* pool2; // ( (((imageSize-K1)/stride + 1)/P1 - K2)/stride + 1)/P2, (((imageSize-K1)/stride + 1)/P1 - K2)/stride + 1)/P2, C2)
+    float* out_pool2; // ( (((imageSize-K1)/stride + 1)/P1 - K2)/stride + 1)/P2, (((imageSize-K1)/stride + 1)/P1 - K2)/stride + 1)/P2, C2)
     Shape pool2_size;
-    float* fc; 
+    float* out_fc1; 
     Shape fc_size;
-    float* output; // (1,1,10)
+    float* out_fc2; // (1,1,10)
     Shape output_size;
 }Activation;
 
 typedef struct{
-    float* grad_conv1;
-    float* grad_pool1;
-    float* grad_conv2;
-    float* grad_pool2;
-    float* grad_fc;
-    float* grad_output;
+    float* grad_out_conv1;
+    float* grad_out_pool1;
+    float* grad_out_conv2;
+    float* grad_out_pool2;
+    float* grad_out_fc1;
+    float* grad_out_fc2;
 }Grad_Activation;
 
 typedef struct{
-    float* mem_fc_output;
+    float* mem_fc2;
     float* mem_fc1;
     float* mem_conv2;
     float* mem_conv1;
@@ -118,116 +166,138 @@ void init_params(float*params, int size){
 void CNN_init(CNN *model, int imageSize,int k1, int c1, int stride1, int p1,int k2, int c2, int stride2,int p2,int fc1_size, int outputSize, int batch){
     printf("init model\n");
     model->imageSize = imageSize;
-    model->params.conv1.size = k1;
-    model->params.conv1.stride = stride1;
-    model->params.conv1.filters = c1;
-    model->params.pool1Size = p1;
-    model->params.Conv2.size = k2;
-    model->params.Conv2.stride = stride2;
-    model->params.Conv2.filters = c2;
-    model->params.pool2Size = p2;
-    model->params.fc.input_size = ((((imageSize - k1)/stride1 + 1)/p1 - k2)/stride2 + 1)*((((imageSize - k1)/stride1 + 1)/p1 - k2)/stride2 + 1)*c2;
-    model->params.fc.output_size = fc1_size;
-    model->params.output.input_size = fc1_size;
-    model->params.output.output_size = outputSize;
-
+    init_conv(&(model->params.conv1), imageSize, imageSize, 1, k1, stride1, c1);
+    init_pool(&(model->params.pool1), 
+                model->params.conv1.size.out_size.x, 
+                model->params.conv1.size.out_size.y, 
+                model->params.conv1.size.out_size.z,
+                p1);
+    init_conv(&(model->params.conv2), model->params.pool1.size.out_size.x, 
+                model->params.pool1.size.out_size.y, 
+                model->params.pool1.size.out_size.z, 
+                k2, stride2, c2);
+    init_pool(&(model->params.pool2),
+                model->params.conv2.size.out_size.x,
+                model->params.conv2.size.out_size.y,
+                model->params.conv2.size.out_size.z,
+                p2);
+    init_fc(&(model->params.fc1), 
+             model->params.pool2.size.out_size.x*model->params.pool2.size.out_size.y*model->params.pool2.size.out_size.z, 
+             fc1_size);
+    init_fc(&(model->params.fc2), fc1_size, outputSize);
+    
     model->params_memory = NULL;
     model->acts_memory = NULL;
     model->grad_acts_memory = NULL;
     model->mementun_memory = NULL;
+    model->datas.data = NULL;
+    model->datas.labels = NULL;
 
-    int total_params = k1*k1*c1 + k2*k2*c2 + model->params.fc.input_size*fc1_size + fc1_size*outputSize;
-    model->toal_params = total_params;
-    printf("total params: %d\n", total_params);
-    model->params_memory = (float*)malloc(total_params * sizeof(float));
+    // int total_params = k1*k1*c1 + k2*k2*c2 + model->params.fc.input_size*fc1_size + fc1_size*outputSize;
     // init weights
-    model->params.conv1.weights = model->params_memory;
-    init_params(model->params.conv1.weights, k1*k1*c1);
-    model->params.Conv2.weights = model->params_memory + k1*k1*c1;
-    init_params(model->params.Conv2.weights, k2*k2*c2);
-    model->params.fc.weights = model->params_memory + k1*k1*c1 + k2*k2*c2;
-    init_params(model->params.fc.weights, model->params.fc.input_size*model->params.fc.output_size);
-    model->params.output.weights = model->params_memory + k1*k1*c1 + k2*k2*c2 + model->params.fc.input_size*fc1_size;
-    init_params(model->params.output.weights, fc1_size*outputSize);
+    if(model->params_memory == NULL){
+        int total_params = model->params.conv1.num_params + model->params.conv2.num_params + model->params.fc1.num_params + model->params.fc2.num_params;
+        model->toal_params = total_params;
+        printf("total params: %d\n", total_params);
+        model->params_memory = (float*)malloc(total_params * sizeof(float));
 
-    model->datas.data = (float*)malloc(imageSize*imageSize*batch*sizeof(float));
-    model->datas.labels = (int*)malloc(batch*sizeof(int));
+        int offset = 0;
+        model->params.conv1.weights = model->params_memory + offset;
+        init_params(model->params.conv1.weights, model->params.conv1.num_params);
+        offset += model->params.conv1.num_params;
 
-    // init activation
-    Activation* acts = &(model->acts);
-    acts->conv1_size = (Shape){(imageSize - k1)/stride1 + 1, (imageSize - k1)/stride1 + 1, c1};
-    acts->pool1_size = (Shape){acts->conv1_size.x/p1, acts->conv1_size.y/p1, c1};
-    acts->conv2_size = (Shape){(acts->pool1_size.x - k2)/stride2 + 1, (acts->pool1_size.y - k2)/stride2 + 1, c2};
-    acts->pool2_size = (Shape){acts->conv2_size.x/p2, acts->conv2_size.y/p2, c2};
-    acts->fc_size = (Shape){1,1,fc1_size};
-    acts->output_size = (Shape){1,1,outputSize};
+        model->params.conv2.weights = model->params_memory + offset;
+        init_params(model->params.conv2.weights, model->params.conv2.num_params);
+        offset += model->params.conv2.num_params;
 
-    int offset = 0;
-    if(model->acts_memory == NULL){
-        long int total_acts = 0;
-        total_acts += acts->conv1_size.x*acts->conv1_size.y*acts->conv1_size.z;
-        total_acts += acts->pool1_size.x*acts->pool1_size.y*acts->pool1_size.z;
-        total_acts += acts->conv2_size.x*acts->conv2_size.y*acts->conv2_size.z;
-        total_acts += acts->pool2_size.x*acts->pool2_size.y*acts->pool2_size.z;
-        total_acts += acts->fc_size.z;
-        total_acts += acts->output_size.z;
+        model->params.fc1.weights = model->params_memory + offset;
+        init_params(model->params.fc1.weights, model->params.fc1.weight_size);
+        offset += model->params.fc1.weight_size;
+
+        model->params.fc1.bias = model->params_memory + offset;
+        init_params(model->params.fc1.bias, model->params.fc1.bias_size);
+        offset += model->params.fc1.bias_size;
+
+        model->params.fc2.weights = model->params_memory + offset;
+        init_params(model->params.fc2.weights, model->params.fc2.weight_size);
+        offset += model->params.fc2.weight_size;
+
+        model->params.fc2.bias = model->params_memory + offset;
+        init_params(model->params.fc2.bias, model->params.fc2.bias_size);
+        offset += model->params.fc2.bias_size;
+    }
+
+    if(model->datas.data == NULL && model->datas.labels == NULL){
+        model->datas.data = (float*)malloc(imageSize*imageSize*batch*sizeof(float));
+        model->datas.labels = (int*)malloc(batch*sizeof(int));
+    }
+
+
+    
+    if(model->acts_memory == NULL && model->grad_acts_memory == NULL){
+        // acts save every layer output
+        unsigned int total_acts = 0;
+        int offset = 0;
+        Paramerters params = model->params;
+
+        total_acts += params.conv1.size.out_size.x * params.conv1.size.out_size.y * params.conv1.size.out_size.z;
+        total_acts += params.pool1.size.out_size.x * params.pool1.size.out_size.y * params.pool1.size.out_size.z;
+        total_acts += params.conv2.size.out_size.x * params.conv2.size.out_size.y * params.conv2.size.out_size.z;
+        total_acts += params.pool2.size.out_size.x * params.pool2.size.out_size.y * params.pool2.size.out_size.z;
+        total_acts += params.fc1.size.out_size.x * params.fc1.size.out_size.y * params.fc1.size.out_size.z;
+        total_acts += params.fc2.size.out_size.x * params.fc2.size.out_size.y * params.fc2.size.out_size.z;
         model->total_acts = total_acts;
-        printf("total_acts: %ld\n", total_acts);
+
         model->acts_memory = (float*)malloc(total_acts*sizeof(float));
-        acts->conv1 = model->acts_memory;
-        offset += acts->conv1_size.x*acts->conv1_size.y*acts->conv1_size.z;
-        acts->pool1 = model->acts_memory + offset;
-        offset += acts->pool1_size.x*acts->pool1_size.y*acts->pool1_size.z;
-        acts->conv2 = model->acts_memory + offset;
-        offset += acts->conv2_size.x*acts->conv2_size.y*acts->conv2_size.z;
-        acts->pool2 = model->acts_memory + offset;
-        offset += acts->pool2_size.x*acts->pool2_size.y*acts->pool2_size.z;
-        acts->fc = model->acts_memory + offset;
-        offset += acts->fc_size.z;
-        acts->output = model->acts_memory + offset;
+        model->grad_acts_memory = (float*)malloc(total_acts*sizeof(float));
+
+        model->acts.out_conv1 = model->acts_memory + offset;
+        model->grad_acts.grad_out_conv1 = model->grad_acts_memory + offset;
+        offset += params.conv1.size.out_size.x * params.conv1.size.out_size.y * params.conv1.size.out_size.z;
+        
+        model->acts.out_pool1 = model->acts_memory + offset;
+        model->grad_acts.grad_out_pool1 = model->grad_acts_memory + offset;
+        offset += params.pool1.size.out_size.x * params.pool1.size.out_size.y * params.pool1.size.out_size.z;
+
+        model->acts.out_conv2 = model->acts_memory + offset;
+        model->grad_acts.grad_out_conv2 = model->grad_acts_memory + offset;
+        offset += params.conv2.size.out_size.x * params.conv2.size.out_size.y * params.conv2.size.out_size.z;
+
+        model->acts.out_pool2 = model->acts_memory + offset;
+        model->grad_acts.grad_out_pool2 = model->grad_acts_memory + offset;
+        offset += params.pool2.size.out_size.x * params.pool2.size.out_size.y * params.pool2.size.out_size.z;
+
+        model->acts.out_fc1 = model->acts_memory + offset;
+        model->grad_acts.grad_out_fc1 = model->grad_acts_memory + offset;
+        offset += params.fc1.size.out_size.x * params.fc1.size.out_size.y * params.fc1.size.out_size.z;
+
+        model->acts.out_fc2 = model->acts_memory + offset;
+        model->grad_acts.grad_out_fc2 = model->grad_acts_memory + offset;
     }
 
-    // init grad_acts
-    if (model->grad_acts_memory == NULL){
-        model->total_grad_acts = 0;
-        model->total_grad_acts += outputSize;
-        model->total_grad_acts += fc1_size;
-        model->total_grad_acts += acts->pool2_size.x*acts->pool2_size.y*acts->pool2_size.z;
-        model->total_grad_acts += acts->conv2_size.x*acts->conv2_size.y*acts->conv2_size.z;
-        model->total_grad_acts += acts->pool1_size.x*acts->pool1_size.y*acts->pool1_size.z;
-        model->total_grad_acts += acts->conv1_size.x*acts->conv1_size.y*acts->conv1_size.z;
-        model->grad_acts_memory = (float*)malloc(model->total_grad_acts*sizeof(float));
-        offset = 0;
-        model->grad_acts.grad_conv1 = model->grad_acts_memory; 
-        offset += acts->conv1_size.x*acts->conv1_size.y*acts->conv1_size.z;
-        model->grad_acts.grad_pool1 = model->grad_acts_memory + offset;
-        offset += acts->pool1_size.x*acts->pool1_size.y*acts->pool1_size.z;
-        model->grad_acts.grad_conv2 = model->grad_acts_memory + offset;
-        offset += acts->conv2_size.x*acts->conv2_size.y*acts->conv2_size.z;
-        model->grad_acts.grad_pool2 = model->grad_acts_memory + offset;
-        offset += acts->pool2_size.x*acts->pool2_size.y*acts->pool2_size.z;
-        model->grad_acts.grad_fc = model->grad_acts_memory + offset;
-        offset += acts->fc_size.z;
-        model->grad_acts.grad_output = model->grad_acts_memory + offset;
-    }
 
     if(model->mementun_memory == NULL){
         int total_mementun = 0;
-        total_mementun += fc1_size*outputSize;
-        total_mementun += acts->pool2_size.x * acts->pool2_size.y * acts->pool2_size.z * fc1_size;
-        total_mementun += acts->conv2_size.x*acts->conv2_size.y*acts->conv2_size.z;
-        total_mementun += acts->conv1_size.x*acts->conv1_size.y*acts->conv1_size.z;
-        
+        int offset = 0;
+
+        total_mementun += model->params.fc2.num_params;
+        total_mementun += model->params.fc1.num_params;
+        total_mementun += model->params.conv2.num_params;
+        total_mementun += model->params.conv1.num_params;
+
         model->mementun_memory = (float*)malloc(total_mementun*sizeof(float));
 
-        offset = 0;
-        model->mementun.mem_fc_output = model->mementun_memory; // fc1_size*outputSize
-        offset += fc1_size*outputSize;
-        model->mementun.mem_fc1 = model->mementun_memory + offset; // acts->pool2_size.x * acts->pool2_size.y * acts->pool2_size.z * fc1_size
-        offset += acts->pool2_size.x * acts->pool2_size.y * acts->pool2_size.z * fc1_size;
-        model->mementun.mem_conv2 = model->mementun_memory + offset; // acts->conv2_size.x*acts->conv2_size.y*acts->conv2_size.z
-        offset += acts->conv2_size.x*acts->conv2_size.y*acts->conv2_size.z;
-        model->mementun.mem_conv1 = model->mementun_memory + offset; // acts->conv1_size.x*acts->conv1_size.y*acts->conv1_size.z
+        model->mementun.mem_conv1 = model->mementun_memory + offset;
+        offset += model->params.conv1.num_params;
+
+        model->mementun.mem_conv2 = model->mementun_memory + offset;
+        offset += model->params.conv2.num_params;
+
+        model->mementun.mem_fc1 = model->mementun_memory + offset;
+        offset += model->params.fc1.num_params;
+
+        model->mementun.mem_fc2 = model->mementun_memory + offset;
+
     }
 }
 
@@ -268,7 +338,7 @@ Shape conv_forward(float *inp, int h, int w,int z,float* out, float* conv_weight
     int out_w = (w-kernel_size)/stride + 1;
     Shape output_shape = {out_h, out_w, channel};
     int out_size = out_h*out_w;
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for (int c = 0; c < channel; c++){
         for (int i = 0; i < out_h; i++){
             for (int j = 0; j < out_w; j++){
@@ -312,11 +382,11 @@ Shape pool_froward(float* inp, int h, int w, int z, float* out, int pool_size){
 }
 
 
-Shape fc_forward(float* inp, int inp_size, float* out, float* weights, int output_size){
+Shape fc_forward(float* inp, int inp_size, float* out, float* weights, int output_size, float* bias){
     Shape output_shape = {1,1,output_size};
 
     for(int i = 0; i<output_size; i++){
-        out[i] = 0.0f;
+        out[i] = bias[i];
     }
 
     for(int i=0;i<inp_size; i++){
@@ -346,16 +416,25 @@ void softmax_forward(float* inp, int inp_size){
 }
    
 void cnn_forward(CNN *model, float* inp, int h, int w){
-    Activation* acts = &model->acts;
-    Shape conv1_shape = conv_forward(inp,h,w,1, acts->conv1, model->params.conv1.weights, model->params.conv1.size, model->params.conv1.stride, model->params.conv1.filters);
-    Shape pool1_shape = pool_froward(acts->conv1, conv1_shape.x, conv1_shape.y, conv1_shape.z, acts->pool1, model->params.pool1Size);
-    Shape conv2_shape = conv_forward(acts->pool1, pool1_shape.x, pool1_shape.y, pool1_shape.z, acts->conv2, model->params.Conv2.weights, model->params.Conv2.size, model->params.Conv2.stride, model->params.Conv2.filters);
-    Shape pool2_shape = pool_froward(acts->conv2, conv2_shape.x, conv2_shape.y, conv2_shape.z, acts->pool2, model->params.pool2Size);
+    Activation* acts = &(model->acts);
+    Paramerters* params = &(model->params);
+    conv_forward(inp,h,w,1, 
+                acts->out_conv1, params->conv1.weights, params->conv1.kernel_size, params->conv1.stride, params->conv1.filters);
+    pool_froward(acts->out_conv1,
+                params->conv1.size.out_size.y,params->conv1.size.out_size.x, params->conv1.size.out_size.z,
+                acts->out_pool1, params->pool1.pool_size);
+    conv_forward(acts->out_pool1, params->pool1.size.out_size.y,params->pool1.size.out_size.x, params->pool1.size.out_size.z,
+                acts->out_conv2, params->conv2.weights, params->conv2.kernel_size,params->conv2.stride, params->conv2.filters);
+    pool_froward(acts->out_conv2, params->conv2.size.out_size.y, params->conv2.size.out_size.x,params->conv2.size.out_size.z,
+                acts->out_pool2,params->pool2.pool_size);
     // printf("pool2_shape: %d, %d, %d\n", pool2_shape.x, pool2_shape.y, pool2_shape.z);
-    int flatten_size = pool2_shape.x*pool2_shape.y*pool2_shape.z;
-    Shape fc_shape = fc_forward(acts->pool2, flatten_size, acts->fc, model->params.fc.weights, model->params.fc.output_size);
-    Shape output_shape = fc_forward(acts->fc, fc_shape.z, acts->output, model->params.output.weights, model->params.output.output_size);
-    softmax_forward(acts->output, output_shape.z);
+    // int flatten_size = pool2_shape.x*pool2_shape.y*pool2_shape.z;
+    fc_forward(acts->out_pool2, params->pool2.size.out_size.x*params->pool2.size.out_size.y*params->pool2.size.out_size.z,
+                acts->out_fc1, params->fc1.weights, params->fc1.size.out_size.z,params->fc1.bias);
+    // fc_forward(acts->fc, fc_shape.z, acts->output, model->params.output.weights, model->params.output.output_size);
+    fc_forward(acts->out_fc1, params->fc1.size.out_size.z, 
+                acts->out_fc2, params->fc2.weights, params->fc2.size.out_size.z,params->fc2.bias);
+    softmax_forward(acts->out_fc2, params->fc2.size.out_size.z);
 }
 
 void softmax_backward(float* inp, int inp_size,int target, float* d_inp){
@@ -480,76 +559,82 @@ void conv_backward(float* inp, Shape inp_size, float*d_loss, Shape out_size, flo
         so back conv d_inp_size: (X+K-1-K+1, Y+K-1-K+1) => (X,Y)
     */
     // update d_inp
-    int new_row = out_size.x+2*(kernel_size-1), new_col = out_size.y+2*(kernel_size-1), new_channel = out_size.z; 
-    float* full_conv_dloss = (float*)malloc(new_channel*new_row*new_col*sizeof(float));
+    if(d_inp != NULL){
+        int new_row = out_size.x+2*(kernel_size-1), new_col = out_size.y+2*(kernel_size-1), new_channel = out_size.z; 
+        float* full_conv_dloss = (float*)malloc(new_channel*new_row*new_col*sizeof(float));
 
-    for(int inp_c=0;inp_c<inp_size.z; inp_c++){
-        float* d_inp_c = d_inp + inp_c*inp_h*inp_w;
-        for(int i=0;i<inp_h*inp_w;i++){
-            d_inp_c[i] = 0.0f;
-        }
-    }
-
-    for(int z=0;z<out_z;z++){
-        float* full_conv_dloss_z = full_conv_dloss + z*new_row*new_col;
-        float* d_loss_z = d_loss + z*out_h*out_w;
-        float* conv_weights_z = conv_weights + z*kernel_size*kernel_size;
-        // full model padding
-        for(int x=0;x<new_row;x++){
-            for(int y=0;y<new_col;y++){
-                if (x<kernel_size-1 || x>=out_h+kernel_size-1 || y<kernel_size-1 || y>=out_w+kernel_size-1){
-                    full_conv_dloss_z[x*new_col+y] = 0.0f;
-                }else{
-                    full_conv_dloss_z[x*new_col+y] = d_loss_z[(x-kernel_size+1)*out_w + y-kernel_size+1];
-                }
+        for(int inp_c=0;inp_c<inp_size.z; inp_c++){
+            float* d_inp_c = d_inp + inp_c*inp_h*inp_w;
+            for(int i=0;i<inp_h*inp_w;i++){
+                d_inp_c[i] = 0.0f;
             }
         }
 
-        for(int i=0;i<inp_size.x; i++){
-            for(int j=0;j<inp_size.y;j++){
-                float d_inp_ij = 0.0f;
-                for (int k = 0; k < kernel_size; k++){
-                    for (int l = 0; l < kernel_size; l++){
-                        d_inp_ij += full_conv_dloss_z[(i+k)*new_col + j+l]*conv_weights_z[k*kernel_size+l];
+        for(int z=0;z<out_z;z++){
+            float* full_conv_dloss_z = full_conv_dloss + z*new_row*new_col;
+            float* d_loss_z = d_loss + z*out_h*out_w;
+            float* conv_weights_z = conv_weights + z*kernel_size*kernel_size;
+            // full model padding
+            for(int x=0;x<new_row;x++){
+                for(int y=0;y<new_col;y++){
+                    if (x<kernel_size-1 || x>=out_h+kernel_size-1 || y<kernel_size-1 || y>=out_w+kernel_size-1){
+                        full_conv_dloss_z[x*new_col+y] = 0.0f;
+                    }else{
+                        full_conv_dloss_z[x*new_col+y] = d_loss_z[(x-kernel_size+1)*out_w + y-kernel_size+1];
                     }
                 }
-                for(int inp_c=0;inp_c<inp_size.z; inp_c++){
-                    float* d_inp_c = d_inp + inp_c*inp_h*inp_w;
-                    d_inp_c[i*inp_w+j] += d_inp_ij;
+            }
+
+            for(int i=0;i<inp_size.x; i++){
+                for(int j=0;j<inp_size.y;j++){
+                    float d_inp_ij = 0.0f;
+                    for (int k = 0; k < kernel_size; k++){
+                        for (int l = 0; l < kernel_size; l++){
+                            d_inp_ij += full_conv_dloss_z[(i+k)*new_col + j+l]*conv_weights_z[k*kernel_size+l];
+                        }
+                    }
+                    for(int inp_c=0;inp_c<inp_size.z; inp_c++){
+                        float* d_inp_c = d_inp + inp_c*inp_h*inp_w;
+                        d_inp_c[i*inp_w+j] += d_inp_ij;
+                    }
                 }
             }
         }
+        free(full_conv_dloss);
     }
 
     for (int i = 0; i < channel*kernel_size*kernel_size; i++){
         conv_weights[i] += mementun[i];
     }
-    
-
-    free(full_conv_dloss);
 }
 
-void cnn_backward(CNN *model,float* inp,int label, float lr){
-    Activation acts = model->acts;
-    Grad_Activation grad_acts = model->grad_acts;
-    float* output = acts.output;
-    int* target = model->datas.labels;
-    int output_size = acts.output_size.z;
-    softmax_backward(output, output_size,label, grad_acts.grad_output);
+void cnn_backward(CNN *model,float* inp,int label, float lr, int output_size){
+    Activation* acts = &(model->acts);
+    Grad_Activation* grad_acts = &(model->grad_acts);
+    Paramerters* params = &(model->params);
+    Mementun* mementun = &(model->mementun);
+    float* output = acts->out_fc2;
+    softmax_backward(output, output_size,label, grad_acts->grad_out_fc2);
+    // TODO 更新 fc bias
+    fc_backward(acts->out_fc1,params->fc2.size.in_size, grad_acts->grad_out_fc2,
+                 params->fc2.size.out_size,params->fc2.weights,grad_acts->grad_out_fc1,mementun->mem_fc2,lr);
 
-    fc_backward(acts.fc, acts.fc_size, grad_acts.grad_output, acts.output_size, model->params.output.weights, grad_acts.grad_fc, model->mementun.mem_fc_output, lr);
-    fc_backward(acts.pool2, acts.pool2_size, grad_acts.grad_fc, acts.fc_size, model->params.fc.weights, grad_acts.grad_pool2, model->mementun.mem_fc1, lr);
-    //TODO: there has some question
-    pool_backward(acts.conv2, acts.conv2_size, grad_acts.grad_pool2, acts.pool2_size, grad_acts.grad_conv2, model->params.pool2Size);
-    conv_backward(acts.pool1, acts.pool1_size, 
-                    grad_acts.grad_conv2, acts.conv2_size, acts.conv2, 
-                    grad_acts.grad_pool1, model->params.Conv2.weights, 
-                    model->mementun.mem_conv2 , model->params.Conv2.size, 
-                    model->params.Conv2.stride, model->params.Conv2.filters, lr);
-    pool_backward(acts.conv1, acts.conv1_size, grad_acts.grad_pool1, acts.pool1_size, grad_acts.grad_conv1, model->params.pool1Size);
-    conv_backward(inp, (Shape){28,28,1}, grad_acts.grad_conv1, acts.conv1_size, acts.conv1, 
-                    grad_acts.grad_pool1, model->params.conv1.weights, model->mementun.mem_conv1, 
-                    model->params.conv1.size, model->params.conv1.stride, model->params.conv1.filters, lr);
+    fc_backward(acts->out_pool2, params->fc2.size.in_size, grad_acts->grad_out_fc1,params->fc1.size.out_size,params->fc1.weights,
+                grad_acts->grad_out_pool2, mementun->mem_fc1, lr);
+    
+    pool_backward(acts->out_conv2, params->pool2.size.in_size, grad_acts->grad_out_pool2, params->pool2.size.out_size,
+                    grad_acts->grad_out_conv2, params->pool2.pool_size);
+    
+    conv_backward(acts->out_pool1, params->conv2.size.in_size, grad_acts->grad_out_conv2,params->conv2.size.out_size,
+                    acts->out_conv2, grad_acts->grad_out_pool1, params->conv2.weights, mementun->mem_conv2, params->conv2.kernel_size,
+                    params->conv2.stride, params->conv2.filters, lr);
+    
+    pool_backward(acts->out_conv1, params->pool1.size.in_size, grad_acts->grad_out_pool1,params->pool1.size.out_size,
+                    grad_acts->grad_out_conv1, params->pool1.pool_size);
+    
+    conv_backward(inp, params->conv1.size.in_size, grad_acts->grad_out_conv1, params->conv1.size.out_size,acts->out_conv1, NULL,
+                    params->conv1.weights, mementun->mem_conv1, params->conv1.kernel_size, params->conv1.stride,params->conv1.filters,lr);
+
 }
 
 
@@ -579,9 +664,10 @@ int main(int argc, char const *argv[])
                 float* images = model.datas.data + t*ImageSize*ImageSize;
                 int label_idx = model.datas.labels[t];
                 cnn_forward(&model,images,dataloader.imageSize.row,dataloader.imageSize.col);
-                loss -= logf(model.acts.output[label_idx] + 1e-10f);
-                cnn_backward(&model,images, label_idx, LEARN_RATE);
-                corr += model.acts.output[label_idx]>0.5f?1.0f:0.0f;
+                loss -= logf(model.acts.out_fc2[label_idx] + 1e-10f);
+                // printf("label: %d, output: %f\n", label_idx, model.acts.output[label_idx]);
+                cnn_backward(&model,images, label_idx, LEARN_RATE, model.params.fc2.size.out_size.z);
+                corr += model.acts.out_fc2[label_idx]>0.5f?1.0f:0.0f;
             }
             
             // loss = 0.0f;
@@ -594,7 +680,7 @@ int main(int argc, char const *argv[])
             float* test_images = dataloader.images + (train_size+t)*ImageSize*ImageSize;
             int test_labels = dataloader.labels + train_size+t;
             cnn_forward(&model,test_images,dataloader.imageSize.row,dataloader.imageSize.col);
-            corr += model.acts.output[test_labels]>0.5f?1.0f:0.0f;
+            corr += model.acts.out_fc2[test_labels]>0.5f?1.0f:0.0f;
         }
         printf("epoch: %d, test accuracy: %f\n", epoch, corr/test_size);
         end = clock();
