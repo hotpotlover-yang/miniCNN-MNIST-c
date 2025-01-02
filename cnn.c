@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
-#include <dataloader.h>
 #include <float.h>
+#include "dataloader.h"
 
 
 #define TRAIN_IMG_PATH "data/train-images.idx3-ubyte"
@@ -480,53 +480,55 @@ void conv_backward(float* inp, Shape inp_size, float*d_loss, Shape out_size, flo
         so back conv d_inp_size: (X+K-1-K+1, Y+K-1-K+1) => (X,Y)
     */
     // update d_inp
-    int new_row = out_size.x+2*(kernel_size-1), new_col = out_size.y+2*(kernel_size-1), new_channel = out_size.z; 
-    float* full_conv_dloss = (float*)malloc(new_channel*new_row*new_col*sizeof(float));
+    if(d_inp != NULL){
+        int new_row = out_size.x+2*(kernel_size-1), new_col = out_size.y+2*(kernel_size-1), new_channel = out_size.z; 
+        float* full_conv_dloss = (float*)malloc(new_channel*new_row*new_col*sizeof(float));
 
-    for(int inp_c=0;inp_c<inp_size.z; inp_c++){
-        float* d_inp_c = d_inp + inp_c*inp_h*inp_w;
-        for(int i=0;i<inp_h*inp_w;i++){
-            d_inp_c[i] = 0.0f;
-        }
-    }
-
-    for(int z=0;z<out_z;z++){
-        float* full_conv_dloss_z = full_conv_dloss + z*new_row*new_col;
-        float* d_loss_z = d_loss + z*out_h*out_w;
-        float* conv_weights_z = conv_weights + z*kernel_size*kernel_size;
-        // full model padding
-        for(int x=0;x<new_row;x++){
-            for(int y=0;y<new_col;y++){
-                if (x<kernel_size-1 || x>=out_h+kernel_size-1 || y<kernel_size-1 || y>=out_w+kernel_size-1){
-                    full_conv_dloss_z[x*new_col+y] = 0.0f;
-                }else{
-                    full_conv_dloss_z[x*new_col+y] = d_loss_z[(x-kernel_size+1)*out_w + y-kernel_size+1];
-                }
+        for(int inp_c=0;inp_c<inp_size.z; inp_c++){
+            float* d_inp_c = d_inp + inp_c*inp_h*inp_w;
+            for(int i=0;i<inp_h*inp_w;i++){
+                d_inp_c[i] = 0.0f;
             }
         }
 
-        for(int i=0;i<inp_size.x; i++){
-            for(int j=0;j<inp_size.y;j++){
-                float d_inp_ij = 0.0f;
-                for (int k = 0; k < kernel_size; k++){
-                    for (int l = 0; l < kernel_size; l++){
-                        d_inp_ij += full_conv_dloss_z[(i+k)*new_col + j+l]*conv_weights_z[k*kernel_size+l];
+        for(int z=0;z<out_z;z++){
+            float* full_conv_dloss_z = full_conv_dloss + z*new_row*new_col;
+            float* d_loss_z = d_loss + z*out_h*out_w;
+            float* conv_weights_z = conv_weights + z*kernel_size*kernel_size;
+            // full model padding
+            for(int x=0;x<new_row;x++){
+                for(int y=0;y<new_col;y++){
+                    if (x<kernel_size-1 || x>=out_h+kernel_size-1 || y<kernel_size-1 || y>=out_w+kernel_size-1){
+                        full_conv_dloss_z[x*new_col+y] = 0.0f;
+                    }else{
+                        full_conv_dloss_z[x*new_col+y] = d_loss_z[(x-kernel_size+1)*out_w + y-kernel_size+1];
                     }
                 }
-                for(int inp_c=0;inp_c<inp_size.z; inp_c++){
-                    float* d_inp_c = d_inp + inp_c*inp_h*inp_w;
-                    d_inp_c[i*inp_w+j] += d_inp_ij;
+            }
+
+            for(int i=0;i<inp_size.x; i++){
+                for(int j=0;j<inp_size.y;j++){
+                    float d_inp_ij = 0.0f;
+                    for (int k = 0; k < kernel_size; k++){
+                        for (int l = 0; l < kernel_size; l++){
+                            d_inp_ij += full_conv_dloss_z[(i+k)*new_col + j+l]*conv_weights_z[k*kernel_size+l];
+                        }
+                    }
+                    for(int inp_c=0;inp_c<inp_size.z; inp_c++){
+                        float* d_inp_c = d_inp + inp_c*inp_h*inp_w;
+                        d_inp_c[i*inp_w+j] += d_inp_ij;
+                    }
                 }
             }
         }
-    }
 
-    for (int i = 0; i < channel*kernel_size*kernel_size; i++){
-        conv_weights[i] += mementun[i];
-    }
-    
+        for (int i = 0; i < channel*kernel_size*kernel_size; i++){
+            conv_weights[i] += mementun[i];
+        }
+        
 
-    free(full_conv_dloss);
+        free(full_conv_dloss);
+    }
 }
 
 void cnn_backward(CNN *model,float* inp,int label, float lr){
@@ -539,7 +541,6 @@ void cnn_backward(CNN *model,float* inp,int label, float lr){
 
     fc_backward(acts.fc, acts.fc_size, grad_acts.grad_output, acts.output_size, model->params.output.weights, grad_acts.grad_fc, model->mementun.mem_fc_output, lr);
     fc_backward(acts.pool2, acts.pool2_size, grad_acts.grad_fc, acts.fc_size, model->params.fc.weights, grad_acts.grad_pool2, model->mementun.mem_fc1, lr);
-    //TODO: there has some question
     pool_backward(acts.conv2, acts.conv2_size, grad_acts.grad_pool2, acts.pool2_size, grad_acts.grad_conv2, model->params.pool2Size);
     conv_backward(acts.pool1, acts.pool1_size, 
                     grad_acts.grad_conv2, acts.conv2_size, acts.conv2, 
@@ -548,7 +549,7 @@ void cnn_backward(CNN *model,float* inp,int label, float lr){
                     model->params.Conv2.stride, model->params.Conv2.filters, lr);
     pool_backward(acts.conv1, acts.conv1_size, grad_acts.grad_pool1, acts.pool1_size, grad_acts.grad_conv1, model->params.pool1Size);
     conv_backward(inp, (Shape){28,28,1}, grad_acts.grad_conv1, acts.conv1_size, acts.conv1, 
-                    grad_acts.grad_pool1, model->params.conv1.weights, model->mementun.mem_conv1, 
+                    NULL, model->params.conv1.weights, model->mementun.mem_conv1, 
                     model->params.conv1.size, model->params.conv1.stride, model->params.conv1.filters, lr);
 }
 
