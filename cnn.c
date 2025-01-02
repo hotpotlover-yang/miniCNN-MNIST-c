@@ -569,22 +569,25 @@ int main(int argc, char const *argv[])
 
     for (int epoch = 0; epoch < EPOCHS; epoch++){
         start = clock();
-        float loss = 0.0f;
+        
         for(int b=0;b<train_size/BATCH;b++){
             // float* images = dataloader.images + b*BATCH*ImageSize*ImageSize;
             load_betch_images(&dataloader, &model.datas, b, BATCH);
-            
+            float loss = 0.0f;
+            float corr = 0.0f;
             for (int t = 0; t < BATCH; t++){
                 float* images = model.datas.data + t*ImageSize*ImageSize;
                 int label_idx = model.datas.labels[t];
                 cnn_forward(&model,images,dataloader.imageSize.row,dataloader.imageSize.col);
                 loss -= logf(model.acts.output[label_idx] + 1e-10f);
                 cnn_backward(&model,images, label_idx, LEARN_RATE);
+                corr += model.acts.output[label_idx]>0.5f?1.0f:0.0f;
             }
             
             // loss = 0.0f;
+            printf("epoch: %d,batch:%d,  loss:%.3f  corr: %.3f \n", epoch,b, loss/BATCH, corr/BATCH);
         }
-        printf("epoch: %d, loss: %f\n", epoch, loss/BATCH);
+        
 
         float corr = 0.0f;
         for(int t=0;t<test_size;t++){    
